@@ -1,6 +1,8 @@
 #  Imports
+import pprint
 import re
 import pycurl
+import datetime
 import lxml.html as LH
 
 from io import BytesIO
@@ -109,22 +111,22 @@ countries = sel(dom)
 countries = [(result.text, BOOKING_URL_PREFIX+result.get('href')) for result in countries]
 countries = sc.parallelize(countries)
 
+# Retrives Cities
 cities = countries.flatMapValues(map_cities)
 cities = cities.map(lambda c: ((c[0], c[1][0]), c[1][1]))
 cities = cities.filter(lambda c: c[0][1] == 'Vaucresson')
 
-
+# Retrieve Hotels
 hotels = cities.flatMapValues(map_hotels)
 hotels = hotels.map(lambda c: ((c[0][0], c[0][1], c[1][0]), c[1][1]))
 hotels = hotels.mapValues(parse_booking_hotel_page)
 hotels = hotels.map(lambda c: (c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[1][3], c[1][4], c[1][5]))
-#print(hotels.collect())
-#exit()
 
 df = hotels.toDF(['country', 'city', 'name', 'url', 'latitude', 'longitude', 'rate', 'address', 'pictures'])
-
+#pprint.pprint(df.collect())
+#exit()
 df.write\
     .format("org.apache.spark.sql.cassandra")\
     .mode('append')\
-    .options(table="booking", keyspace="hotelearth")\
+    .options(keyspace="hotel_earth", table="booking_parser")\
     .save()
