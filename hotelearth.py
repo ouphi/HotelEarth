@@ -6,6 +6,12 @@ import lxml.html as LH
 from io import BytesIO
 from lxml.cssselect import CSSSelector
 
+from pyspark import SparkContext, SparkConf
+from pyspark.sql import SQLContext
+conf = SparkConf().setAppName("HotelEarth")
+sc = SparkContext(conf=conf)
+sqlContext = SQLContext(sc)
+
 
 def css_select(dom, selector):
     '''
@@ -33,6 +39,37 @@ def simple_curl(url):
     return body.decode(BOOKING_CHARSET)
 
 
+def map_cities(country_url):
+    '''
+    Parse Booking web page with every cities corresponding to a country
+    and retreive cities and their URL
+    country_url : URL corresponding to a country, containing every cities
+    of the country
+    Return cities : list of URL corresponding to a city
+    '''
+    content = simple_curl(country_url)
+    dom = LH.fromstring(content)
+    sel = CSSSelector('[name=cities] + h3 + .general a')
+    cities = sel(dom)
+    cities = [(result.text, BOOKING_URL_PREFIX+result.get('href')) for result in cities]
+    return cities
+
+
+def map_hotels(city_url):
+    '''
+    Parse Booking web page with list of hotels corresponding to a city and retreive hotels and URL
+    containing informations about these hotels
+    city_url : URL corresponding to a city, containing every hotels of the city
+    Return cities : list of url corresponding to an hotel
+    '''
+    content = simple_curl(city_url)
+    dom = LH.fromstring(content)
+    sel = CSSSelector('[name=hotels] + h3 + .general a')
+    hotels = sel(dom)
+    hotels = [(result.text, BOOKING_URL_PREFIX+result.get('href')) for result in hotels]
+    return hotels
+
+
 def parse_booking_hotel_page(url):
     '''
     Receive an URL corresponding to a hotel webpage, parse informations about the hotel and
@@ -57,3 +94,37 @@ def parse_booking_hotel_page(url):
     pictures = [result.get('href') for result in pictures]
     return (url, float(latitude), float(longitude), float(rate), address[0].text, pictures)
 
+
+#  Constants
+BOOKING_URL_PREFIX = 'https://www.booking.com'
+BOOKING_COUNTRIES_URL = '/destination.en-gb.html'
+BOOKING_CHARSET = 'UTF-8'
+CITY_FILTER = 'Boston'
+
+#  Retrieve Countries
+content = simple_curl(BOOKING_URL_PREFIX+BOOKING_COUNTRIES_URL)
+dom = LH.fromstring(content)
+sel = CSSSelector('.flatList a')
+countries = sel(dom)
+countries = [(result.text, BOOKING_URL_PREFIX+result.get('href')) for result in countries]
+countries = sc.parallelize(countries)
+
+cities = countries.flatMapValues(map_cities)
+cities = cities.map(lambda c: ((c[0], c[1][0]), c[1][1]))
+cities = cities.filter(lambda c: c[0][1] == 'Vaucresson')
+
+
+hotels = cities.flatMapValues(map_hotels)
+hotels = hotels.map(lambda c: ((c[0][0], c[0][1], c[1][0]), c[1][1]))
+hotels = hotels.mapValues(parse_booking_hotel_page)
+hotels = hotels.map(lambda c: (c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[1][3], c[1][4], c[1][5]))
+#print(hotels.collect())
+#exit()
+
+df = hotels.toDF(['country', 'city', 'name', 'url', 'latitude', 'longitude', 'rate', 'address', 'pictures'])
+
+df.write\
+    .format("org.apache.spark.sql.cassandra")\
+    .mode('append')\
+    .options(table="booking", keyspace="hotelearth")\
+    .save()
