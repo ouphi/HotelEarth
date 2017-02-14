@@ -1,5 +1,6 @@
-CREATE KEYSPACE hotel_earth WITH replication = {'class':'SimpleStrategy', 'replication_factor' : 1};
-CREATE TABLE hotel_earth.booking_parser (
+#!/bin/sh
+query="CREATE KEYSPACE hotel_earth WITH replication = {'class':'SimpleStrategy', 'replication_factor' : 1};
+CREATE TABLE hotel_earth.booking (
        country text,
        city text,
        name text,
@@ -11,3 +12,5 @@ CREATE TABLE hotel_earth.booking_parser (
        pictures list<text>,
        PRIMARY KEY ((country, city), name)
 );
+"
+echo $query | cqlsh

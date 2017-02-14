@@ -1,9 +1,9 @@
 #  Imports
 import pprint
 import re
-import pycurl
 import datetime
 import lxml.html as LH
+import requests
 
 from io import BytesIO
 from lxml.cssselect import CSSSelector
@@ -15,6 +15,48 @@ sc = SparkContext(conf=conf)
 sqlContext = SQLContext(sc)
 
 
+
+#  Constants
+COUNTRIES_PER_CHUNK = 1
+BOOKING_URL_PREFIX = 'https://www.booking.com'
+BOOKING_COUNTRIES_URL = '/destination.en-gb.html'
+INFLUXDB_DB_NAME = 'hotel_earth'
+INFLUXDB_TABLE_NAME = 'booking_parser_activity'
+INFLUXDB_WRITE_URL = "http://localhost:8086/write?db="+INFLUXDB_DB_NAME
+INFLUXDB_QUERY_URL = "http://localhost:8086/query?db="+INFLUXDB_DB_NAME
+CASSANDRA_KEYSPACE_NAME = "hotel_earth"
+CASSANDRA_TABLE_NAME = "booking"
+
+
+
+#  Functions
+def count_in_a_partition(iterator):
+  yield sum(1 for _ in iterator)
+  
+  
+def repartitionate(rdd, tag):
+	print("\tNow parsing "+str(rdd.count())+" " +str(tag)+ " ...");
+	rdd_partitions = rdd.getNumPartitions()
+	rdd = rdd.partitionBy(rdd_partitions)
+	print("\tRepartion: " + str(rdd_partitions) + " => " + str(rdd.mapPartitions(count_in_a_partition).collect()))
+	return rdd
+  
+  
+def log_influxdb(tag):
+	'''
+	Logs a tag to a local influx DB database'
+	tag: The tag string to log
+	'''
+	requests.post(INFLUXDB_WRITE_URL, INFLUXDB_TABLE_NAME+" "+str(tag)+"=1")
+	
+def clean_influxdb():
+	'''
+	Cleans the influxdb database
+	'''
+	requests.post(INFLUXDB_QUERY_URL, params={"q":"DELETE FROM "+INFLUXDB_TABLE_NAME+";"}).text
+
+
+
 def css_select(dom, selector):
     '''
     css selector
@@ -22,23 +64,6 @@ def css_select(dom, selector):
     from lxml.cssselect import CSSSelector as CS
     sel = CS(selector)
     return sel(dom)
-
-
-def simple_curl(url):
-    '''
-    Does a curl query using the url as parameter and follow every HTTP queries
-    url : An url
-    return : Result of curl query
-    '''
-    buffer = BytesIO()
-    c = pycurl.Curl()
-    c.setopt(c.URL, url)
-    c.setopt(pycurl.FOLLOWLOCATION, True)
-    c.setopt(c.WRITEDATA, buffer)
-    c.perform()
-    c.close()
-    body = buffer.getvalue()
-    return body.decode(BOOKING_CHARSET)
 
 
 def map_cities(country_url):
@@ -49,7 +74,8 @@ def map_cities(country_url):
     of the country
     Return cities : list of URL corresponding to a city
     '''
-    content = simple_curl(country_url)
+    content = requests.get(country_url).text
+    log_influxdb("parsed_countries")
     dom = LH.fromstring(content)
     sel = CSSSelector('[name=cities] + h3 + .general a')
     cities = sel(dom)
@@ -64,7 +90,8 @@ def map_hotels(city_url):
     city_url : URL corresponding to a city, containing every hotels of the city
     Return cities : list of url corresponding to an hotel
     '''
-    content = simple_curl(city_url)
+    content = requests.get(city_url).text
+    log_influxdb("parsed_cities")
     dom = LH.fromstring(content)
     sel = CSSSelector('[name=hotels] + h3 + .general a')
     hotels = sel(dom)
@@ -78,7 +105,8 @@ def parse_booking_hotel_page(url):
     return a dictionary with these informations
     '''
     #  get html
-    content = simple_curl(url)
+    content = requests.get(url).text
+    log_influxdb("parsed_hotels")
     dom = LH.fromstring(content)
     #  get latitude
     latitude = re.findall('booking.env.b_map_center_latitude = ([-\.\d]+)', content)
@@ -97,36 +125,53 @@ def parse_booking_hotel_page(url):
     return (url, float(latitude), float(longitude), float(rate), address[0].text, pictures)
 
 
-#  Constants
-BOOKING_URL_PREFIX = 'https://www.booking.com'
-BOOKING_COUNTRIES_URL = '/destination.en-gb.html'
-BOOKING_CHARSET = 'UTF-8'
-CITY_FILTER = 'Boston'
 
+
+#  App
 #  Retrieve Countries
-content = simple_curl(BOOKING_URL_PREFIX+BOOKING_COUNTRIES_URL)
+content = requests.get(BOOKING_URL_PREFIX+BOOKING_COUNTRIES_URL).text
+log_influxdb("parsed_world")
 dom = LH.fromstring(content)
 sel = CSSSelector('.flatList a')
-countries = sel(dom)
-countries = [(result.text, BOOKING_URL_PREFIX+result.get('href')) for result in countries]
-countries = sc.parallelize(countries)
+all_countries = sel(dom)
+all_countries = [(re.sub(r'\W+', '_', result.text), BOOKING_URL_PREFIX+result.get('href')) for result in all_countries]
+len_countries = len(all_countries)
+print("There are "+str(len_countries)+ " countries.")
+print("They will be processed by chunks of " + str(COUNTRIES_PER_CHUNK) + ".")
 
-# Retrives Cities
-cities = countries.flatMapValues(map_cities)
-cities = cities.map(lambda c: ((c[0], c[1][0]), c[1][1]))
-cities = cities.filter(lambda c: c[0][1] == 'Vaucresson')
 
-# Retrieve Hotels
-hotels = cities.flatMapValues(map_hotels)
-hotels = hotels.map(lambda c: ((c[0][0], c[0][1], c[1][0]), c[1][1]))
-hotels = hotels.mapValues(parse_booking_hotel_page)
-hotels = hotels.map(lambda c: (c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[1][3], c[1][4], c[1][5]))
 
-df = hotels.toDF(['country', 'city', 'name', 'url', 'latitude', 'longitude', 'rate', 'address', 'pictures'])
-#pprint.pprint(df.collect())
-#exit()
-df.write\
-    .format("org.apache.spark.sql.cassandra")\
-    .mode('append')\
-    .options(keyspace="hotel_earth", table="booking_parser")\
-    .save()
+# Loop through them, we don't use spark but a regular for to have time checkpoints and not be forced to compute all the data in one time
+for i in range(0,1+(len_countries/COUNTRIES_PER_CHUNK)):
+	clean_influxdb()
+
+	countries = all_countries[i*COUNTRIES_PER_CHUNK: (i+1)*COUNTRIES_PER_CHUNK]
+	print("Processing country chunk #"+str(i)+" => from #"+str(i*COUNTRIES_PER_CHUNK)+ " to #" +str((i+1)*COUNTRIES_PER_CHUNK-1)+ " ...")
+	countries = sc.parallelize(countries)
+	countries = repartitionate(countries, "countries")
+	
+	
+	# Retrieves Cities
+	cities = countries.flatMapValues(map_cities)
+	cities = cities.map(lambda c: ((c[0], c[1][0]), c[1][1]))
+	cities = repartitionate(cities, "cities")
+	
+	
+	# Retrieve Hotels
+	hotels = cities.flatMapValues(map_hotels)
+	hotels = hotels.map(lambda c: ((c[0][0], c[0][1], c[1][0]), c[1][1]))
+	hotels = repartitionate(hotels, "hotels")
+	
+	
+	# Retrieve Informations
+	hotels = hotels.mapValues(parse_booking_hotel_page)
+	hotels = hotels.map(lambda c: (c[0][0], c[0][1], c[0][2], c[1][0], c[1][1], c[1][2], c[1][3], c[1][4], c[1][5]))
+	
+	# Saving Informations
+	df = hotels.toDF(['country', 'city', 'name', 'url', 'latitude', 'longitude', 'rate', 'address', 'pictures'])
+	df.write\
+	    .format("org.apache.spark.sql.cassandra")\
+	    .mode('append')\
+	    .options(keyspace=CASSANDRA_KEYSPACE_NAME, table=CASSANDRA_TABLE_NAME)\
+	    .save()
+	print("\tChunk successfully saved !!!\n")
