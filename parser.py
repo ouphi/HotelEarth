@@ -17,7 +17,7 @@ sqlContext = SQLContext(sc)
 
 
 #  Constants
-COUNTRIES_PER_CHUNK = 1
+COUNTRIES_PER_CHUNK = 8
 BOOKING_URL_PREFIX = 'https://www.booking.com'
 BOOKING_COUNTRIES_URL = '/destination.en-gb.html'
 INFLUXDB_DB_NAME = 'hotel_earth'
@@ -35,10 +35,11 @@ def count_in_a_partition(iterator):
   
   
 def repartitionate(rdd, tag):
-	print("\tNow parsing "+str(rdd.count())+" " +str(tag)+ " ...");
+	print("\tRepartitioning "+str(rdd.count())+" " +str(tag)+ " ...")
 	rdd_partitions = rdd.getNumPartitions()
 	rdd = rdd.partitionBy(rdd_partitions)
-	print("\tRepartion: " + str(rdd_partitions) + " => " + str(rdd.mapPartitions(count_in_a_partition).collect()))
+	print("\tNow parsing "+str(rdd.count())+" repartitioned " +str(tag)+ " ...");
+	#print("\tRepartion: " + str(rdd_partitions) + " => " + str(rdd.mapPartitions(count_in_a_partition).collect()))
 	return rdd
   
   
