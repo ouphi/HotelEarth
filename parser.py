@@ -178,6 +178,6 @@ for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
 	df = hotels.toDF(['country', 'city', 'name', 'url', 'latitude', 'longitude', 'rate', 'address', 'pictures'])
 
 	#  Save dataframes in elasticsearch
-	df.write.format("org.elasticsearch.spark.sql").option("es.resource", "hotelearth/test").mode("append").save("hotelearth/test")
+	df.write.format("org.elasticsearch.spark.sql").option("es.resource", "hotelearth/hotel").mode("append").save("hotelearth/hotel")
 
 	print("\tChunk successfully saved !!!\n")
