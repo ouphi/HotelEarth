@@ -1,5 +1,6 @@
 #  Imports
 import re
+import sys
 import lxml.html as LH
 import requests
 
@@ -276,9 +277,11 @@ for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
 
     #  Saving Informations
     df = sqlContext.createDataFrame(hotels, schema)
-    #  Save dataframe in elasticsearch
-    df.write.format("org.elasticsearch.spark.sql").option(
-        "es.resource", "hotelearth/hotel").mode(
-        "append").save("hotelearth/hotel")
+
+    if '--dry-run' not in sys.argv:
+        #  Save dataframe in elasticsearch
+        df.write.format("org.elasticsearch.spark.sql").option(
+            "es.resource", "hotelearth/hotel").mode(
+            "append").save("hotelearth/hotel")
 
     print("\tChunk successfully saved !!!\n")
