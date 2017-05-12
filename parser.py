@@ -36,6 +36,11 @@ INFLUXDB_WRITE_URL = "http://localhost:8086/write?db=" + INFLUXDB_DB_NAME
 INFLUXDB_QUERY_URL = "http://localhost:8086/query?db=" + INFLUXDB_DB_NAME
 
 
+#  Globals
+global current_chunk
+current_chunk = 0
+
+
 #  Functions
 def count_in_a_partition(iterator):
     yield sum(1 for _ in iterator)
@@ -55,6 +60,9 @@ def log_influxdb(tag):
     Logs a tag to a local influx DB database'
     tag: The tag string to log
     '''
+    global current_chunk
+    if (tag != "WORLD"):
+    	tag = str(tag) + "_chunk" + str(current_chunk)
     requests.post(INFLUXDB_WRITE_URL, INFLUXDB_TABLE_NAME +
                   " " + str(tag) + "=1")
 
@@ -85,8 +93,8 @@ def map_cities(country_url):
     Return cities : list of URL corresponding to a city
     '''
     try:
-        content = requests.get(country_url).text
-        log_influxdb("parsed_countries")
+        content = requests.get(country_url, headers={'Accept-Encoding': 'identity'}).text
+        log_influxdb("COUNTRIES")
     except:
         return []
     dom = LH.fromstring(content)
@@ -107,8 +115,8 @@ def map_hotels(city_url):
     Return cities : list of url corresponding to an hotel
     '''
     try:
-        content = requests.get(city_url).text
-        log_influxdb("parsed_cities")
+        content = requests.get(city_url, headers={'Accept-Encoding': 'identity'}).text
+        log_influxdb("CITIES")
     except:
         return []
     dom = LH.fromstring(content)
@@ -125,7 +133,7 @@ def get_grades(url):
 
     '''
     try:
-        content = requests.get(url).text
+        content = requests.get(url, headers={'Accept-Encoding': 'identity'}).text
     except:
         return {}
 
@@ -158,10 +166,10 @@ def parse_booking_hotel_page(url):
     '''
     #  get html
     try:
-        content = requests.get(url).text
-        log_influxdb("parsed_hotels")
+        content = requests.get(url.replace("en-gb", "en-us"), headers={'Accept-Encoding': 'identity'}).text #US to get prices in $$$
+        log_influxdb("HOTELS")
     except:
-        return ("#", float(0), float(0), float(0), '', [], '', '', {})
+        return ("#", float(0), float(0), float(0), '', [], '', '', {}, 'N/A')
 
     try:
         dom = LH.fromstring(content)
@@ -181,8 +189,16 @@ def parse_booking_hotel_page(url):
         #  get the address
         address = css_select(dom, 'span.hp_address_subtitle')
         #  get images link
-        pictures = css_select(dom, 'div#photos_distinct a')
-        pictures = [result.get('href') for result in pictures]
+        #pictures = css_select(dom, 'div#photos_distinct a')
+        #pictures = [result.get('href').replace("max400", "max1024x768") for result in pictures]
+        pictures = re.findall(r'https:\/\/.+\.bstatic\.com\/images\/hotel\/max1024x768\/.+\.jpg', content)
+        pictures = list(set(pictures))
+        # get price
+        price = re.findall(r'start at U*S*(.+?) .+', content)
+        if (len(price) >= 1):
+        	price = "From "+price[0]
+        else:
+        	price = "N/A"
         #  get description
         description = css_select(dom, "div.hotel_description_wrapper_exp")
         description = htmlstring(description[0])
@@ -196,19 +212,21 @@ def parse_booking_hotel_page(url):
         if len(address) >= 1:
             return (url, float(latitude), float(longitude), float(rate),
                     address[0].text, pictures, description, reviews_url,
-                    reviews)
+                    reviews, price)
         else:
             return (url, float(latitude), float(longitude), float(rate),
-                    '', pictures, description, reviews_url, reviews)
+                    '', pictures, description, reviews_url, reviews, price)
     except:
         return ("#", float(0), float(0), float(0), '', [], '', '',
-                dict(hotel_clean=float(-4)))
+                dict(hotel_clean=float(-4)), 'N/A')
+
+
 
 
 #  App
 #  Retrieve Countries
-content = requests.get(BOOKING_URL_PREFIX + BOOKING_COUNTRIES_URL).text
-log_influxdb("parsed_world")
+content = requests.get(BOOKING_URL_PREFIX + BOOKING_COUNTRIES_URL, headers={'Accept-Encoding': 'identity'}).text
+log_influxdb("WORLD")
 dom = LH.fromstring(content)
 all_countries = css_select(dom, 'a.dest-sitemap__country-anchor')
 all_countries = [(re.sub(r'\W+', '_', result.text), BOOKING_URL_PREFIX +
@@ -221,8 +239,8 @@ print("They will be processed by chunks of " + str(COUNTRIES_PER_CHUNK) + ".")
 # Loop through them, we don't use spark but a regular for to have time
 # checkpoints and not be forced to compute all the data in one time
 for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
-    clean_influxdb()
-
+    #clean_influxdb()
+    current_chunk = i
     countries = all_countries[i * COUNTRIES_PER_CHUNK:
                               (i + 1) * COUNTRIES_PER_CHUNK]
     print("Processing country chunk #"
@@ -252,7 +270,8 @@ for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
                                    float(c[1][8].get('hotel_services', -2)),
                                    float(c[1][8].get('hotel_staff', -2)),
                                    float(c[1][8].get('hotel_value', -2)),
-                                   float(c[1][8].get('hotel_wifi', -2))])
+                                   float(c[1][8].get('hotel_wifi', -2)),
+                                   c[1][9]])
 
     schema = StructType([
         StructField("country", StringType(), True),
@@ -272,7 +291,8 @@ for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
         StructField("hotel_services", FloatType(), True),
         StructField("hotel_staff", FloatType(), True),
         StructField("hotel_value", FloatType(), True),
-        StructField("hotel_wifi", FloatType(), True)
+        StructField("hotel_wifi", FloatType(), True),
+        StructField("price", StringType(), True)
     ])
 
     #  Saving Informations
@@ -283,5 +303,7 @@ for i in range(0, 1 + (len_countries / COUNTRIES_PER_CHUNK)):
         df.write.format("org.elasticsearch.spark.sql").option(
             "es.resource", "hotelearth/hotel").mode(
             "append").save("hotelearth/hotel")
+    else:
+    	hotels.collect()
 
     print("\tChunk successfully saved !!!\n")

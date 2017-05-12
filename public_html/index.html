@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+        
+	<meta name="description" content="Dive deep into a stunning 3D Earth and travel around the world to plan your next holiday!">
+	<meta name="keywords" content="Hotel, Earth, holiday, vacation, visualization, booking.com, Travel, around, the, world, 3D, globe">
+	
+	<meta property="fb:app_id" content="1749930918616853" />
+	<meta property="og:title" content="Hotel Earth ★ Visualize your holiday" />
+	<meta property="og:site_name" content="Hotel Earth ★ Visualize your holiday" />
+	<meta property="og:description" content="Dive deep into a stunning 3D Earth and travel around the world to plan your next holiday!" />
+	<meta property="og:url" content="https://www.hotel-earth.world/" />
+	<meta property="og:image" content="https://www.hotel-earth.world/img/full.png" />
+	
+	<meta name="twitter:card" content="summary">
+	<meta name="twitter:url" content="https://www.hotel-earth.world/">
+	<meta name="twitter:title" content="Hotel Earth ★ Visualize your holiday">
+	<meta name="twitter:description" content="Dive deep into a stunning 3D Earth and travel around the world to plan your next holiday!">
+	<meta name="twitter:image" content="https://www.hotel-earth.world/img/full.png">
+  
+  <title>Hotel Earth ★ Visualize your holiday</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="stylesheet" type="text/css" href="swipebox.min.css">
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" type="text/css" href="cesium/Widgets/widgets.css">
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="logo"></div>
+  <main id="hotel-earth-ui">
+	  <aside>
+		  <div id="blue-top" v-bind:class="[current_hotel ? 'transparent' : '']">
+			  <button id="backToResults" v-bind:class="[current_hotel ? 'shifted-from-right' : '', 'shiftable']"
+			  	v-on:click="flyBack()">
+			  	<i class="fa fa-arrow-left"></i>
+				  Go back to the results
+			  </button>
+		  </div>
+		   <ul id="cards-hotel-results" v-if="hotels.length" v-bind:class="{shifted: current_hotel}">
+			  <li v-for="hotel in hotels" class="cards-hotel-result purpleish-hover" v-on:click="flyOver(hotel)" v-if="hotel._source.url != '#'">
+			    <div :style="{backgroundImage: 'url(' + hotel._source.pictures[0] + ')'}" class="cards-hotel-preview"></div>
+			    <span class="cards-hotel-title">{{ hotel._source.name }}</span>
+			    <span class="cards-hotel-address">{{ hotel._source.address }}</span>
+			    <span class="cards-rating-score">{{ hotel._source.rate }}</span>
+			    <ol role="img" class="cards-rating-stars">
+				    <li class="cards-rating-star" v-if="Math.round(hotel._source.rate) >= 2"></li>
+				    <li class="cards-rating-star" v-if="Math.round(hotel._source.rate) >= 4"></li>
+				    <li class="cards-rating-star" v-if="Math.round(hotel._source.rate) >= 6"></li>
+				    <li class="cards-rating-star" v-if="Math.round(hotel._source.rate) >= 8"></li>
+				    <li class="cards-rating-star" v-if="Math.round(hotel._source.rate) >= 10"></li>
+				    <li class="cards-rating-star cards-rating-star-half" v-if="Math.round(hotel._source.rate) %2 == 1"></li>
+				    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(hotel._source.rate) <= 0"></li>
+				    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(hotel._source.rate) <= 2"></li>
+				    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(hotel._source.rate) <= 4"></li>
+				    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(hotel._source.rate) <= 6"></li>
+				    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(hotel._source.rate) <= 8"></li>
+				</ol>
+				<ol class="cards-hotel-actions">
+					<li class="cards-hotel-order">
+						<a :href="hotel._source.url" target="_blank"><img src="img/money.png">{{hotel._source.price}}</a>
+					</li>
+					<li class="cards-hotel-see-details">
+						<img src="img/zoom.png">
+						<span>See more details</span>
+					</li>
+				</ol>
+			  </li>
+		  </ul>
+		  <span class="no-results" v-else-if="query && !network_error"> No hotels match your search criteria </span>
+		  <span class="no-results" v-else-if="network_error"> Oops, it's impossible to retrieve the hotels right now </span>
+		  
+		  <div id="hotelPreview" v-bind:class="[current_hotel ? 'shifted-from-right' : '', 'shiftable']">
+			  	<div v-if="current_hotel">
+			    <div class="hotel-header" :style="{backgroundImage: 'url(' + current_hotel._source.pictures[0] + ')'}"></div>
+			    <span class="hotel-price">{{current_hotel._source.price}}</span>
+			    <button class="hotel-more-pictures">
+			    	<div onclick="vue.displaySwipebox()">
+				    	<div class="hotel-more-pictures-icon blurrable"></div>
+				    </div>
+				    <label>More pictures</label>
+				</button>
+				<div class="blue-bar">
+					<span class="cards-hotel-title">{{ current_hotel._source.name }}</span>
+				    <span class="cards-hotel-address">{{ current_hotel._source.address }}</span>
+				    <span class="cards-rating-score">{{ current_hotel._source.rate }}</span>
+				    <ol role="img" class="cards-rating-stars">
+					    <li class="cards-rating-star" v-if="Math.round(current_hotel._source.rate) >= 2"></li>
+					    <li class="cards-rating-star" v-if="Math.round(current_hotel._source.rate) >= 4"></li>
+					    <li class="cards-rating-star" v-if="Math.round(current_hotel._source.rate) >= 6"></li>
+					    <li class="cards-rating-star" v-if="Math.round(current_hotel._source.rate) >= 8"></li>
+					    <li class="cards-rating-star" v-if="Math.round(current_hotel._source.rate) >= 10"></li>
+					    <li class="cards-rating-star cards-rating-star-half" v-if="Math.round(current_hotel._source.rate) %2 == 1"></li>
+					    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(current_hotel._source.rate) <= 0"></li>
+					    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(current_hotel._source.rate) <= 2"></li>
+					    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(current_hotel._source.rate) <= 4"></li>
+					    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(current_hotel._source.rate) <= 6"></li>
+					    <li class="cards-rating-star cards-rating-star-empty" v-if="Math.round(current_hotel._source.rate) <= 8"></li>
+					</ol>
+				</div>
+				<div class="hotel-preview-actions">
+					<ol>
+						<li><a :href="current_hotel._source.url" target="_blank" class="hotel-preview-action">
+							<img src="img/order.png" class="blurrable"><span>Book now</span>
+						</a></li>
+						<li><a :href="current_hotel._source.reviews_url" target="_blank" class="hotel-preview-action">
+							<img src="img/talk.png" class="blurrable"><span>Read reviews</span>
+						</a></li>
+						<li><a :href="'mailto:?subject=Check this hotel out!&body=Hi, I found this hotel and thought you might like it! ' + current_hotel._source.url"
+							class="hotel-preview-action">
+							<img src="img/message.png" class="blurrable"><span>Share it</span>
+						</a></li>
+						<li><a class="hotel-preview-action" onclick="vue.releaseCamera()">
+							<img src="img/camera.png" class="blurrable"><span>Control camera</span>
+						</a></li>
+					</ol>
+				</div>
+				<p class="hotel-preview-description" v-html="prettifyDescription(current_hotel._source.description)"></p>
+			  	</div>
+		  </div>
+		  
+	  </aside>
+	  <div id="searchBar" v-bind:class="[current_hotel ? 'shifted' : '', final_searchbar ? 'final' : '']">
+		  <i class="fa fa-search"></i>
+		  <input type="text" placeholder="Where do you want to go?" id="searchInput"
+		  	v-on:change="elasticSearch" v-on:keyup="elasticSearchOnKeyUp" v-model="query">
+		  <img src="img/arrow.png" id="searchArrow" class="blurrable" />
+	  </div>
+  </main>
+<script src="https://code.jquery.com/jquery-latest.min.js" type="text/javascript"></script>
+<script src="jquery.swipebox.min.js" type="text/javascript"></script>
+<script src="https://unpkg.com/vue"></script>
+<script src="cesium/Cesium.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
